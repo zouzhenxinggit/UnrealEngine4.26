@@ -465,6 +465,8 @@ public:
 	
 	// Scene depth and stencil.
 	TRefCountPtr<IPooledRenderTarget> SceneDepthZ;
+	TRefCountPtr<IPooledRenderTarget> SceneTestPass;
+
 	TRefCountPtr<FRHIShaderResourceView> SceneStencilSRV;
 	// Scene velocity.
 	TRefCountPtr<IPooledRenderTarget> SceneVelocity;

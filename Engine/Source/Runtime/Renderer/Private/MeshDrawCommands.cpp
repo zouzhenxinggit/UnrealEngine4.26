@@ -545,6 +545,7 @@ void GenerateDynamicMeshDrawCommands(
 	);
 	PassMeshProcessor->SetDrawListContext(&DynamicPassMeshDrawListContext);
 
+	// 处理动态网格批次
 	{
 		const int32 NumCommandsBefore = VisibleCommands.Num();
 		const int32 NumDynamicMeshBatches = DynamicMeshElements.Num();
@@ -565,6 +566,7 @@ void GenerateDynamicMeshDrawCommands(
 			TEXT("Generated %d mesh draw commands for DynamicMeshElements, while preallocating resources only for %d of them."), NumCommandsGenerated, MaxNumDynamicMeshElements);
 	}
 
+	// 处理静态网格批次.
 	{
 		const int32 NumCommandsBefore = VisibleCommands.Num();
 		const int32 NumStaticMeshBatches = DynamicMeshCommandBuildRequests.Num();
@@ -1247,7 +1249,7 @@ public:
 		const int32 NumDrawsPerTask = TaskIndex < DrawNum ? FMath::DivideAndRoundUp(DrawNum, TaskNum) : 0;
 		const int32 StartIndex = TaskIndex * NumDrawsPerTask;
 		const int32 NumDraws = FMath::Min(NumDrawsPerTask, DrawNum - StartIndex);
-
+		// 将绘制所需的数据传递到绘制接口
 		SubmitMeshDrawCommandsRange(VisibleMeshDrawCommands, GraphicsMinimalPipelineStateSet, PrimitiveIdsBuffer, BasePrimitiveIdsOffset, bDynamicInstancing, StartIndex, NumDraws, InstanceFactor, RHICmdList);
 
 		RHICmdList.EndRenderPass();
@@ -1299,6 +1301,7 @@ void FParallelMeshDrawCommandPass::DispatchDraw(FParallelCommandListSet* Paralle
 
 		const ENamedThreads::Type RenderThread = ENamedThreads::GetRenderThread();
 
+		// 前序任务
 		FGraphEventArray Prereqs;
 		if (ParallelCommandListSet->GetPrereqs())
 		{
@@ -1311,10 +1314,12 @@ void FParallelMeshDrawCommandPass::DispatchDraw(FParallelCommandListSet* Paralle
 
 		// Distribute work evenly to the available task graph workers based on NumEstimatedDraws.
 		// Every task will then adjust it's working range based on FVisibleMeshDrawCommandProcessTask results.
+
+		// 构造与工作线程数量相同的并行绘制任务数
 		const int32 NumThreads = FMath::Min<int32>(FTaskGraphInterface::Get().GetNumWorkerThreads(), ParallelCommandListSet->Width);
 		const int32 NumTasks = FMath::Min<int32>(NumThreads, FMath::DivideAndRoundUp(MaxNumDraws, ParallelCommandListSet->MinDrawsPerCommandList));
 		const int32 NumDrawsPerTask = FMath::DivideAndRoundUp(MaxNumDraws, NumTasks);
-
+		// 遍历NumTasks次，构造NumTasks个绘制任务（FDrawVisibleMeshCommandsAnyThreadTask）实例。
 		for (int32 TaskIndex = 0; TaskIndex < NumTasks; TaskIndex++)
 		{
 			const int32 StartIndex = TaskIndex * NumDrawsPerTask;
@@ -1322,9 +1327,10 @@ void FParallelMeshDrawCommandPass::DispatchDraw(FParallelCommandListSet* Paralle
 			checkSlow(NumDraws > 0);
 
 			FRHICommandList* CmdList = ParallelCommandListSet->NewParallelCommandList();
-
+			// 构造FDrawVisibleMeshCommandsAnyThreadTask实例并加入TaskGraph中，其中TaskContext.MeshDrawCommands就是上一节阐述过的由FMeshPassProcessor生成的。
 			FGraphEventRef AnyThreadCompletionEvent = TGraphTask<FDrawVisibleMeshCommandsAnyThreadTask>::CreateTask(&Prereqs, RenderThread)
 				.ConstructAndDispatchWhenReady(*CmdList, TaskContext.MeshDrawCommands, TaskContext.MinimalPipelineStatePassSet, PrimitiveIdsBuffer, BasePrimitiveIdsOffset, TaskContext.bDynamicInstancing, TaskContext.InstanceFactor, TaskIndex, NumTasks);
+			// 将事件加入ParallelCommandListSet，以便追踪深度Pass的并行绘制是否完成。
 			ParallelCommandListSet->AddParallelCommandList(CmdList, AnyThreadCompletionEvent, NumDraws);
 		}
 	}

@@ -47,7 +47,7 @@ namespace EMeshPass
 		HitProxyOpaqueOnly,
 		EditorSelection,
 #endif
-
+		TestPass,
 		Num,
 		NumBits = 5,
 	};
@@ -81,6 +81,7 @@ inline const TCHAR* GetMeshPassName(EMeshPass::Type MeshPass)
 	case EMeshPass::HitProxyOpaqueOnly: return TEXT("HitProxyOpaqueOnly");
 	case EMeshPass::EditorSelection: return TEXT("EditorSelection");
 #endif
+	case EMeshPass::TestPass: return TEXT("TestPass");
 	}
 
 	checkf(0, TEXT("Missing case for EMeshPass %u"), (uint32)MeshPass);
@@ -416,11 +417,11 @@ public:
 
 	// TODO: [PSO API] - As we migrate reuse existing API objects, but eventually we can move to the direct initializers. 
 	// When we do that work, move this to RHI.h as its more appropriate there, but here for now since dependent typdefs are here.
-	FMinimalBoundShaderStateInput	BoundShaderState;
-	FRHIBlendState*					BlendState;
-	FRHIRasterizerState*			RasterizerState;
-	FRHIDepthStencilState*			DepthStencilState;
-	FImmutableSamplerState			ImmutableSamplerState;
+	FMinimalBoundShaderStateInput	BoundShaderState; // 绑定的shader状态
+	FRHIBlendState*					BlendState; // 混合状态
+	FRHIRasterizerState*			RasterizerState; // 光栅化状态
+	FRHIDepthStencilState*			DepthStencilState; // 深度目标状态
+	FImmutableSamplerState			ImmutableSamplerState; // 不可变的采样器状态
 
 	// Note: FGraphicsMinimalPipelineStateInitializer is 8-byte aligned and can't have any implicit padding,
 	// as it is sometimes hashed and compared as raw bytes. Explicit padding is therefore required between
@@ -1003,12 +1004,14 @@ public:
 		FGraphicsMinimalPipelineStateId PipelineId,
 		const FMeshProcessorShaders* ShadersForDebugging);
 
+	// 保存PipelineId和shader调试信息。
 	void Finalize(FGraphicsMinimalPipelineStateId PipelineId, const FMeshProcessorShaders* ShadersForDebugging)
 	{
 		CachedPipelineId = PipelineId;
 		ShaderBindings.Finalize(ShadersForDebugging);	
 	}
 
+	// 提交单个MeshDrawCommand
 	/** Submits commands to the RHI Commandlist to draw the MeshDrawCommand. */
 	static void SubmitDraw(
 		const FMeshDrawCommand& RESTRICT MeshDrawCommand, 
@@ -1024,7 +1027,7 @@ public:
 		return Other.CachedPipelineId.GetId();
 	}
 #if MESH_DRAW_COMMAND_DEBUG_DATA
-	RENDERER_API void SetDebugData(const FPrimitiveSceneProxy* PrimitiveSceneProxy, const FMaterial* Material, const FMaterialRenderProxy* MaterialRenderProxy, const FMeshProcessorShaders& UntypedShaders, const FVertexFactory* VertexFactory);
+	RENDERER_API void SetDebugData(const FPrimitiveSceneProxy* PrimitiveSceneProxy, const FMaterial* Material, const FMaterialRenderProxy* MaterialRenderProxy, const FMeshProcessorShaders& UntypedShaders, const FVertexFactory* VertexFactory, const FGraphicsMinimalPipelineStateInitializer& PipelineState);
 #else
 	void SetDebugData(const FPrimitiveSceneProxy* PrimitiveSceneProxy, const FMaterial* Material, const FMaterialRenderProxy* MaterialRenderProxy, const FMeshProcessorShaders& UntypedShaders, const FVertexFactory* VertexFactory){}
 #endif
@@ -1225,20 +1228,25 @@ public:
 		const FMeshProcessorShaders* ShadersForDebugging,
 		FMeshDrawCommand& MeshDrawCommand) override final
 	{
+		// 获取渲染管线Id
 		FGraphicsMinimalPipelineStateId PipelineId = FGraphicsMinimalPipelineStateId::GetPipelineStateId(PipelineState, GraphicsMinimalPipelineStateSet, NeedsShaderInitialisation);
-
+		// 对FMeshBatch等数据进行处理, 并保存到MeshDrawCommand中.
 		MeshDrawCommand.SetDrawParametersAndFinalize(MeshBatch, BatchElementIndex, PipelineId, ShadersForDebugging);
-
+		// 创建FVisibleMeshDrawCommand, 并将FMeshDrawCommand等数据填充给它.
 		FVisibleMeshDrawCommand NewVisibleMeshDrawCommand;
 		//@todo MeshCommandPipeline - assign usable state ID for dynamic path draws
 		// Currently dynamic path draws will not get dynamic instancing, but they will be roughly sorted by state
 		NewVisibleMeshDrawCommand.Setup(&MeshDrawCommand, DrawPrimitiveId, ScenePrimitiveId, -1, MeshFillMode, MeshCullMode, SortKey);
+		// 直接加入到DrawList TArray中，说明动态模式并未合并和实例化MeshDrawCommand。
 		DrawList.Add(NewVisibleMeshDrawCommand);
 	}
 
 private:
+	// 保存FMeshDrawCommand的列表，使用的数据结构是TChunkedArray。
 	FDynamicMeshDrawCommandStorage& DrawListStorage;
+	// FVisibleMeshDrawCommand列表，使用的数据结构是TArray，它内部引用了FMeshDrawCommand指针，指向的数据存储于DrawListStorage。
 	FMeshCommandOneFrameArray& DrawList;
+	// PSO集合。
 	FGraphicsMinimalPipelineStateSet& GraphicsMinimalPipelineStateSet;
 	bool& NeedsShaderInitialisation;
 };
@@ -1349,6 +1357,7 @@ private:
 	FCriticalSection& CachedMeshDrawCommandLock;
 	FCachedPassMeshDrawList& CachedDrawLists;
 	FStateBucketMap& CachedMeshDrawCommandStateBuckets;
+	// 罗宾汉哈希表，自动合并和计数具有相同哈希值的FMeshDrawCommand
 	const FScene& Scene;
 };
 

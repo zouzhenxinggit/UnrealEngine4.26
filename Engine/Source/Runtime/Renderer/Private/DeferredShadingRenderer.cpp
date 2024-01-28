@@ -1958,6 +1958,7 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 
 	VisualizeVolumetricLightmap(GraphBuilder, SceneColorTexture.Target, SceneDepthTexture.Target);
 
+
 	// Occlusion after base pass
 	if (!bOcclusionBeforeBasePass)
 	{
@@ -2589,6 +2590,8 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 	DoCrossGPUTransfers(GraphBuilder, RenderTargetGPUMask, ViewFamilyTexture);
 #endif
 
+	
+
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ++ViewIndex)
 	{
 		const FViewInfo& View = Views[ViewIndex];
@@ -2613,9 +2616,16 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 		AddSetCurrentStatPass(GraphBuilder, GET_STATID(STAT_CLM_AfterFrame));
 	}
 
+
+	// testPass
+	RenderTestPass(RHICmdList);
 	GraphBuilder.Execute();
 
+	
+
 	ServiceLocalQueue();
+
+
 }
 
 /** Updates the downsized depth buffer with the current full resolution depth buffer. */
@@ -2766,4 +2776,42 @@ bool CanOverlayRayTracingOutput(const FViewInfo& View)
 		&& (View.RayTracingRenderMode != ERayTracingRenderMode::RayTracingDebug)
 		);
 }
+
+void FDeferredShadingSceneRenderer::RenderTestPass(FRHICommandListImmediate& RHICmdList)
+{
+	check(RHICmdList.IsOutsideRenderPass());
+	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
+
+
+	FTexture2DRHIRef DepthTarget = SceneContext.GetSceneDepthSurface();
+
+	// FTexture2DRHIRef Target = (const FTexture2DRHIRef&)SceneContext.SceneTestPass->GetRenderTargetItem().TargetableTexture;
+
+	FRHIRenderPassInfo RPInfo;
+	RPInfo.ColorRenderTargets[0].Action = ERenderTargetActions::DontLoad_DontStore;
+	RPInfo.ColorRenderTargets[0].ArraySlice = 0;
+	RPInfo.ColorRenderTargets[0].MipIndex = 0;
+	RPInfo.ColorRenderTargets[0].RenderTarget = SceneContext.GetSceneColorTexture();
+	RPInfo.DepthStencilRenderTarget.DepthStencilTarget = DepthTarget;
+	RPInfo.DepthStencilRenderTarget.ExclusiveDepthStencil = FExclusiveDepthStencil::DepthWrite_StencilWrite;
+	RPInfo.DepthStencilRenderTarget.Action = MakeDepthStencilTargetActions(ERenderTargetActions::Load_Store, ERenderTargetActions::Load_Store);
+	RHICmdList.BeginRenderPass(RPInfo, TEXT("BeginRenderingTestPass"));
+
+	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
+	{
+		const FViewInfo& View = Views[ViewIndex];
+
+		SCOPED_CONDITIONAL_DRAW_EVENTF(RHICmdList, EventView, Views.Num() > 1, TEXT("View%d"), ViewIndex);
+		if (!View.ShouldRenderView())
+		{
+			continue;
+		}
+
+		Scene->UniformBuffers.UpdateViewUniformBuffer(View);
+		View.ParallelMeshDrawCommandPasses[EMeshPass::TestPass].DispatchDraw(nullptr, RHICmdList);
+	}
+
+	RHICmdList.EndRenderPass();
+}
+
 #endif // RHI_RAYTRACING

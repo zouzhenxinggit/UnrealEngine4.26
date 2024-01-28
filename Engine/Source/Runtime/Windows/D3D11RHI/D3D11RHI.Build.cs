@@ -38,5 +38,9 @@ public class D3D11RHI : ModuleRules
 		{
 			PrivateIncludePathModuleNames.AddRange(new string[] { "TaskGraph" });
 		}
+
+		// 增加头文件引用路径
+		string IntelMetricsDiscoveryPath = Target.UEThirdPartySourceDirectory + "Intel/MetricsDiscovery/MetricsDiscoveryHelper/";
+		PublicSystemIncludePaths.Add(IntelMetricsDiscoveryPath + "source/");
 	}
 }

@@ -2256,6 +2256,7 @@ struct FRelevancePacket
 							if (StaticMeshRelevance.bUseForMaterial && (ViewRelevance.bRenderInMainPass || ViewRelevance.bRenderCustomDepth))
 							{
 								DrawCommandPacket.AddCommandsForMesh(PrimitiveIndex, PrimitiveSceneInfo, StaticMeshRelevance, StaticMesh, Scene, bCanCache, EMeshPass::BasePass);
+								DrawCommandPacket.AddCommandsForMesh(PrimitiveIndex, PrimitiveSceneInfo, StaticMeshRelevance, StaticMesh, Scene, bCanCache, EMeshPass::TestPass);
 								MarkMask |= EMarkMaskBits::StaticMeshVisibilityMapMask;
 
 								if (StaticMeshRelevance.bUseAnisotropy)
@@ -2673,6 +2674,7 @@ static void ComputeAndMarkRelevanceForViewParallel(
 	}
 }
 
+// 它的作用是计算当前的MeshBatch会被哪些MeshPass引用，从而加到view的对应MeshPass的计数
 void ComputeDynamicMeshRelevance(EShadingPath ShadingPath, bool bAddLightmapDensityCommands, const FPrimitiveViewRelevance& ViewRelevance, const FMeshBatchAndRelevance& MeshBatch, FViewInfo& View, FMeshPassMask& PassMask, FPrimitiveSceneInfo* PrimitiveSceneInfo, const FPrimitiveBounds& Bounds)
 {
 	const int32 NumElements = MeshBatch.Mesh->Elements.Num();
@@ -2686,6 +2688,9 @@ void ComputeDynamicMeshRelevance(EShadingPath ShadingPath, bool bAddLightmapDens
 		{
 			PassMask.Set(EMeshPass::BasePass);
 			View.NumVisibleDynamicMeshElements[EMeshPass::BasePass] += NumElements;
+
+			PassMask.Set(EMeshPass::TestPass);
+			View.NumVisibleDynamicMeshElements[EMeshPass::TestPass] += NumElements;
 
 			if (ViewRelevance.bUsesAnisotropy)
 			{
@@ -2929,7 +2934,8 @@ void FSceneRenderer::GatherDynamicMeshElements(
 						{
 							const FMeshBatchAndRelevance& MeshBatch = View.DynamicMeshElements[ElementIndex];
 							FMeshPassMask& PassRelevance = View.DynamicMeshElementsPassRelevance[ElementIndex];
-
+							// 计算当前的MeshBatch会被哪些MeshPass引用
+							// 做动态cache的添加
 							ComputeDynamicMeshRelevance(ShadingPath, bAddLightmapDensityCommands, ViewRelevance, MeshBatch, View, PassRelevance, PrimitiveSceneInfo, Bounds);
 						}
 					}
@@ -4040,6 +4046,8 @@ void FSceneRenderer::ComputeViewVisibility(FRHICommandListImmediate& RHICmdList,
 	{
 		SCOPED_NAMED_EVENT(FSceneRenderer_GatherDynamicMeshElements, FColor::Yellow);
 		// Gather FMeshBatches from scene proxies
+		// 从场景代理收集FMeshBatches
+		// FMeshElementCollector收集场景中所有可见的FPrimitiveSceneProxy的网格数据
 		GatherDynamicMeshElements(Views, Scene, ViewFamily, DynamicIndexBuffer, DynamicVertexBuffer, DynamicReadBuffer,
 			HasDynamicMeshElementsMasks, HasDynamicEditorMeshElementsMasks, MeshCollector);
 	}

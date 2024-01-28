@@ -181,6 +181,11 @@ FVertexFactoryType* FindVertexFactoryType(const FHashedName& TypeName)
 	return FVertexFactoryType::GetVFByName(TypeName);
 }
 
+const FVertexFactory::FVertexStream& FVertexFactory::GetStream(int32 StreamIndex) const
+{
+	return Streams[StreamIndex];
+}
+
 void FVertexFactory::GetStreams(ERHIFeatureLevel::Type InFeatureLevel, EVertexInputStreamType VertexStreamType, FVertexInputStreamArray& OutVertexStreams) const
 {
 	check(IsInitialized());

@@ -6,6 +6,7 @@ MeshPassProcessor.inl:
 
 #pragma once
 
+
 static EVRSShadingRate GetShadingRateFromMaterial(EMaterialShadingRate MaterialShadingRate)
 {
 	if (GRHISupportsVariableRateShading)
@@ -48,6 +49,7 @@ void FMeshPassProcessor::BuildMeshDrawCommands(
 	const FPrimitiveSceneInfo* RESTRICT PrimitiveSceneInfo = PrimitiveSceneProxy ? PrimitiveSceneProxy->GetPrimitiveSceneInfo() : nullptr;
 
 	FMeshDrawCommand SharedMeshDrawCommand;
+	// 网格绘制指令，记录了绘制单个Mesh所需的所有资源和数据
 
 	SharedMeshDrawCommand.SetStencilRef(DrawRenderState.GetStencilRef());
 
@@ -107,10 +109,11 @@ void FMeshPassProcessor::BuildMeshDrawCommands(
 		PassShaders.GeometryShader->GetShaderBindings(Scene, FeatureLevel, PrimitiveSceneProxy, MaterialRenderProxy, MaterialResource, DrawRenderState, ShaderElementData, ShaderBindings);
 	}
 
-	SharedMeshDrawCommand.SetDebugData(PrimitiveSceneProxy, &MaterialResource, &MaterialRenderProxy, PassShaders.GetUntypedShaders(), VertexFactory);
-
+	SharedMeshDrawCommand.SetDebugData(PrimitiveSceneProxy, &MaterialResource, &MaterialRenderProxy, PassShaders.GetUntypedShaders(), VertexFactory, PipelineState);
+	
 	const int32 NumElements = MeshBatch.Elements.Num();
 
+	// 遍历该FMeshBatch的所有MeshBatchElement, 从材质中获取FMeshBatchElement关联的所有shader类型的绑定数据.
 	for (int32 BatchElementIndex = 0; BatchElementIndex < NumElements; BatchElementIndex++)
 	{
 		if ((1ull << BatchElementIndex) & BatchElementMask)

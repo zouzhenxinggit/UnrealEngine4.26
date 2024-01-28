@@ -58,6 +58,8 @@ public:
 	/** Propagates LPVs for all views */
 	void UpdateLPVs(FRHICommandListImmediate& RHICmdList);
 
+	void RenderTestPass(FRHICommandListImmediate& RHICmdList);
+
 	/**
 	 * Renders the scene's prepass for a particular view
 	 * @return true if anything was rendered

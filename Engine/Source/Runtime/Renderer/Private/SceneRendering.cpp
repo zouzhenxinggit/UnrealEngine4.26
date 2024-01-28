@@ -1791,6 +1791,9 @@ void FViewInfo::InitRHIResources()
 		TVC_MAX,
 		*CachedViewUniformShaderParameters);
 
+	UE_LOG(LogRenderer, Warning, TEXT("CachedViewUniformShaderParameters.GameTime:%f"), CachedViewUniformShaderParameters->GameTime);
+	UE_LOG(LogRenderer, Warning, TEXT("CachedViewUniformShaderParameters.FrameNumber:%d"), CachedViewUniformShaderParameters->FrameNumber);
+
 	ViewUniformBuffer = TUniformBufferRef<FViewUniformShaderParameters>::CreateUniformBufferImmediate(*CachedViewUniformShaderParameters, UniformBuffer_SingleFrame);
 
 	const int32 TranslucencyLightingVolumeDim = GetTranslucencyLightingVolumeDim();
@@ -3104,7 +3107,7 @@ void FSceneRenderer::SetupMeshPass(FViewInfo& View, FExclusiveDepthStencil::Type
 		if ((FPassProcessorManager::GetPassFlags(ShadingPath, PassType) & EMeshPassFlags::MainView) != EMeshPassFlags::None)
 		{
 			// Mobile: BasePass and MobileBasePassCSM lists need to be merged and sorted after shadow pass.
-			if (ShadingPath == EShadingPath::Mobile && (PassType == EMeshPass::BasePass || PassType == EMeshPass::MobileBasePassCSM))
+			if (ShadingPath == EShadingPath::Mobile && (PassType == EMeshPass::BasePass || PassType == EMeshPass::MobileBasePassCSM || PassType == EMeshPass::TestPass))
 			{
 				continue;
 			}

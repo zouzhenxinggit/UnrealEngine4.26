@@ -217,7 +217,10 @@ public:
 			{
 				bShaderTypeMatches = true;
 			}
-
+			else if (FCString::Stristr(ShaderType->GetName(), TEXT("TestPass")))
+			{
+				bShaderTypeMatches = true;
+			}
 			return bShaderTypeMatches;
 		}
 	

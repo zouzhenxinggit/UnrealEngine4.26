@@ -606,7 +606,30 @@ public:
 	{
 	}
 
+	/**
+ * Information needed to set a vertex stream.
+ */
+	struct FVertexStream
+	{
+		const FVertexBuffer* VertexBuffer = nullptr;
+		uint32 Offset = 0;
+		uint16 Stride = 0;
+		EVertexStreamUsage VertexStreamUsage = EVertexStreamUsage::Default;
+		uint8 Padding = 0;
+
+		friend bool operator==(const FVertexStream& A, const FVertexStream& B)
+		{
+			return A.VertexBuffer == B.VertexBuffer && A.Stride == B.Stride && A.Offset == B.Offset && A.VertexStreamUsage == B.VertexStreamUsage;
+		}
+
+		FVertexStream()
+		{
+		}
+	};
+
 	virtual FVertexFactoryType* GetType() const { return NULL; }
+
+	const FVertexStream& GetStream(int32 StreamIndex) const;
 
 	void GetStreams(ERHIFeatureLevel::Type InFeatureLevel, EVertexInputStreamType VertexStreamType, FVertexInputStreamArray& OutVertexStreams) const;
 
@@ -701,27 +724,6 @@ protected:
 	 */
 	void InitDeclaration(const FVertexDeclarationElementList& Elements, EVertexInputStreamType StreamType = EVertexInputStreamType::Default);
 
-	/**
-	 * Information needed to set a vertex stream.
-	 */
-	struct FVertexStream
-	{
-		const FVertexBuffer* VertexBuffer = nullptr;
-		uint32 Offset = 0;
-		uint16 Stride = 0;
-		EVertexStreamUsage VertexStreamUsage = EVertexStreamUsage::Default;
-		uint8 Padding = 0;
-
-		friend bool operator==(const FVertexStream& A,const FVertexStream& B)
-		{
-			return A.VertexBuffer == B.VertexBuffer && A.Stride == B.Stride && A.Offset == B.Offset && A.VertexStreamUsage == B.VertexStreamUsage;
-		}
-
-		FVertexStream()
-		{
-		}
-	};
-
 	/** The vertex streams used to render the factory. */
 	TArray<FVertexStream,TInlineAllocator<8> > Streams;
 
@@ -744,6 +746,7 @@ private:
 	/** The RHI vertex declaration used to render the factory during depth only passes. */
 	FVertexDeclarationRHIRef PositionDeclaration;
 	FVertexDeclarationRHIRef PositionAndNormalDeclaration;
+
 };
 
 /**

@@ -16,6 +16,8 @@
 #include "RayTracing/RayTracingMaterialHitShaders.h"
 #include "Hash/CityHash.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogMeshDrawCommand, Log, All);
+
 FCriticalSection FGraphicsMinimalPipelineStateId::PersistentIdTableLock;
 FGraphicsMinimalPipelineStateId::PersistentTableType FGraphicsMinimalPipelineStateId::PersistentIdTable;
 
@@ -834,6 +836,7 @@ void FRayTracingMeshCommand::SetShaders(const FMeshProcessorShaders& Shaders)
 }
 #endif // RHI_RAYTRACING
 
+// 将FMeshBatch的相关数据进行处理并传递到FMeshDrawCommand中
 void FMeshDrawCommand::SetDrawParametersAndFinalize(
 	const FMeshBatch& MeshBatch, 
 	int32 BatchElementIndex,
@@ -1088,7 +1091,7 @@ uint32 FMeshDrawShaderBindings::GetDynamicInstancingHash() const
 
 	return uint32(CityHash64((char*)&HashKey, sizeof(FHashKey)));
 }
-
+// 提交单个MeshDrawCommand到RHICommandList.
 void FMeshDrawCommand::SubmitDraw(
 	const FMeshDrawCommand& RESTRICT MeshDrawCommand, 
 	const FGraphicsMinimalPipelineStateSet& GraphicsMinimalPipelineStateSet,
@@ -1133,7 +1136,7 @@ void FMeshDrawCommand::SubmitDraw(
 #endif
 
 		const FGraphicsMinimalPipelineStateInitializer& MeshPipelineState = MeshDrawCommand.CachedPipelineId.GetPipelineState(GraphicsMinimalPipelineStateSet);
-
+		// 设置和缓存PSO.
 	if (MeshDrawCommand.CachedPipelineId.GetId() != StateCache.PipelineId)
 	{
 		FGraphicsPipelineStateInitializer GraphicsPSOInit = MeshPipelineState.AsGraphicsPipelineStateInitializer();
@@ -1141,13 +1144,13 @@ void FMeshDrawCommand::SubmitDraw(
 		SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit);
 		StateCache.SetPipelineState(MeshDrawCommand.CachedPipelineId.GetId());
 	}
-
+	// 设置和缓存模板值.
 	if (MeshDrawCommand.StencilRef != StateCache.StencilRef)
 	{
 		RHICmdList.SetStencilRef(MeshDrawCommand.StencilRef);
 		StateCache.StencilRef = MeshDrawCommand.StencilRef;
 	}
-
+	// 设置顶点数据.
 	for (int32 VertexBindingIndex = 0; VertexBindingIndex < MeshDrawCommand.VertexStreams.Num(); VertexBindingIndex++)
 	{
 		const FVertexInputStream& Stream = MeshDrawCommand.VertexStreams[VertexBindingIndex];
@@ -1163,9 +1166,10 @@ void FMeshDrawCommand::SubmitDraw(
 			StateCache.VertexStreams[Stream.StreamIndex] = Stream;
 		}
 	}
-
+	// 设置shader绑定的资源.
 	MeshDrawCommand.ShaderBindings.SetOnCommandList(RHICmdList, MeshPipelineState.BoundShaderState.AsBoundShaderState(), StateCache.ShaderBindings);
 
+	// 根据不同的数据调用不同类型的绘制指令到RHICommandList.
 	if (MeshDrawCommand.IndexBuffer)
 	{
 		if (MeshDrawCommand.NumPrimitives > 0)
@@ -1208,7 +1212,7 @@ void FMeshDrawCommand::SubmitDraw(
 }
 }
 #if MESH_DRAW_COMMAND_DEBUG_DATA
-void FMeshDrawCommand::SetDebugData(const FPrimitiveSceneProxy* PrimitiveSceneProxy, const FMaterial* Material, const FMaterialRenderProxy* MaterialRenderProxy, const FMeshProcessorShaders& UntypedShaders, const FVertexFactory* VertexFactory)
+void FMeshDrawCommand::SetDebugData(const FPrimitiveSceneProxy* PrimitiveSceneProxy, const FMaterial* Material, const FMaterialRenderProxy* MaterialRenderProxy, const FMeshProcessorShaders& UntypedShaders, const FVertexFactory* VertexFactory, const FGraphicsMinimalPipelineStateInitializer& PipelineState)
 {
 	DebugData.PrimitiveSceneProxyIfNotUsingStateBuckets = PrimitiveSceneProxy;
 	DebugData.MaterialRenderProxy = MaterialRenderProxy;
@@ -1217,6 +1221,63 @@ void FMeshDrawCommand::SetDebugData(const FPrimitiveSceneProxy* PrimitiveScenePr
 	DebugData.VertexFactory = VertexFactory;
 	DebugData.ResourceName =  PrimitiveSceneProxy ? PrimitiveSceneProxy->GetResourceName() : FName();
 	DebugData.MaterialName = Material->GetFriendlyName();
+
+	FShaderType* ShaderType = UntypedShaders.VertexShader.GetShader()->GetType(UntypedShaders.VertexShader.GetShaderMap()->GetPointerTable());
+	const TCHAR* ShaderFilename = ShaderType->GetShaderFilename();
+	UE_LOG(LogMeshDrawCommand, Log, TEXT("MaterialName: %s"), *DebugData.MaterialName);
+	UE_LOG(LogMeshDrawCommand, Log, TEXT("ShaderFilename: %s"), ShaderFilename);
+
+	UE_LOG(LogMeshDrawCommand, Log, TEXT("绑定着色器状态:"));
+
+	if (PipelineState.BoundShaderState.VertexShaderResource)
+	{
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("VertexShaderResource"));
+	}
+	if (PipelineState.BoundShaderState.HullShaderResource)
+	{
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("HullShaderResource"));
+	}
+	if (PipelineState.BoundShaderState.DomainShaderResource)
+	{
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("DomainShaderResource:"));
+	}
+	if (PipelineState.BoundShaderState.PixelShaderResource)
+	{
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("PixelShaderResource:"));
+	}
+	if (PipelineState.BoundShaderState.GeometryShaderResource)
+	{
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("GeometryShaderResource:"));
+	}
+
+	// 混合状态
+	FBlendStateInitializerRHI BlendState;
+	PipelineState.BlendState->GetInitializer(BlendState);
+	for (int32 Index = 0; Index < 8; Index++)
+	{
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:ColorBlendOp:%d"), Index, BlendState.RenderTargets[Index].ColorBlendOp.GetValue());
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:ColorSrcBlend:%d"), Index, BlendState.RenderTargets[Index].ColorSrcBlend.GetValue());
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:ColorDestBlend:%d"), Index, BlendState.RenderTargets[Index].ColorDestBlend.GetValue());
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:AlphaBlendOp:%d"), Index, BlendState.RenderTargets[Index].AlphaBlendOp.GetValue());
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:AlphaSrcBlend:%d"), Index, BlendState.RenderTargets[Index].AlphaSrcBlend.GetValue());
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:AlphaDestBlend:%d"), Index, BlendState.RenderTargets[Index].AlphaDestBlend.GetValue());
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("BlendState[%d]:ColorWriteMask:%d"), Index, BlendState.RenderTargets[Index].ColorWriteMask.GetValue());
+	}
+
+	// 光栅化状态
+	FRasterizerStateInitializerRHI RasterizerState;
+	PipelineState.RasterizerState->GetInitializer(RasterizerState);
+	// 深度目标状态
+	FDepthStencilStateInitializerRHI DepthStencilState;
+	PipelineState.DepthStencilState->GetInitializer(DepthStencilState);
+
+	for (int32 Index = 0; Index < VertexStreams.Num(); Index++)
+	{
+		const FVertexFactory::FVertexStream vf = VertexFactory->GetStream(VertexStreams[Index].StreamIndex);
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("index:%d FVertexStream.Offset:%d"), VertexStreams[Index].StreamIndex, vf.Offset);
+		UE_LOG(LogMeshDrawCommand, Log, TEXT("index:%d FVertexStream.Stride:%d"), VertexStreams[Index].StreamIndex, vf.Stride);
+	}
+
 }
 #endif
 
@@ -1245,11 +1306,11 @@ void SubmitMeshDrawCommandsRange(
 {
 	FMeshDrawCommandStateCache StateCache;
 	INC_DWORD_STAT_BY(STAT_MeshDrawCalls, NumMeshDrawCommands);
-
+	// 遍历给定范围的绘制指令，一个一个提交。
 	for (int32 DrawCommandIndex = StartIndex; DrawCommandIndex < StartIndex + NumMeshDrawCommands; DrawCommandIndex++)
 	{
 		SCOPED_CONDITIONAL_DRAW_EVENTF(RHICmdList, MeshEvent, GEmitMeshDrawEvent != 0, TEXT("Mesh Draw"));
-
+		// 提交单个MeshDrawCommand.
 		const FVisibleMeshDrawCommand& VisibleMeshDrawCommand = VisibleMeshDrawCommands[DrawCommandIndex];
 		const int32 PrimitiveIdBufferOffset = BasePrimitiveIdsOffset + (bDynamicInstancing ? VisibleMeshDrawCommand.PrimitiveIdBufferOffset : DrawCommandIndex) * sizeof(int32);
 		checkSlow(!bDynamicInstancing || VisibleMeshDrawCommand.PrimitiveIdBufferOffset >= 0);
@@ -1452,7 +1513,9 @@ void FCachedPassMeshDrawListContext::FinalizeCommand(
 			check(MeshDrawCommandDebug.ShaderBindings.GetDynamicInstancingHash() == MeshDrawCommand.ShaderBindings.GetDynamicInstancingHash());
 			check(MeshDrawCommandDebug.GetDynamicInstancingHash() == MeshDrawCommand.GetDynamicInstancingHash());
 #endif
+			// 从缓存哈希表中查找hash的id,如果不存在则添加新的. 从而达到了合并FMeshDrawCommand的目的。
 			SetId = CachedMeshDrawCommandStateBuckets.FindOrAddIdByHash(hash, MeshDrawCommand, FMeshDrawCommandCount());
+			// 计数加1
 			CachedMeshDrawCommandStateBuckets.GetByElementId(SetId).Value.Num++;
 
 #if MESH_DRAW_COMMAND_DEBUG_DATA
