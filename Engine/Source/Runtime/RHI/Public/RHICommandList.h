@@ -221,7 +221,7 @@ struct RHI_API FLockTracker
 #else
 #define PSO_VERIFY	check
 #endif
-
+//IRHICommandContextContainer就是包含了IRHICommandContext对象的类型
 class IRHICommandContextContainer
 {
 public:
@@ -355,10 +355,12 @@ private:
 	uint32 DebugMarkerSizes[MaxDebugMarkerStackDepth] = {};
 #endif
 };
-
+// RHI命令基类.
 struct FRHICommandBase
 {
+	// 下一个命令. (命令链表的节点)
 	FRHICommandBase* Next = nullptr;
+	// 执行命令后销毁.
 	virtual void ExecuteAndDestruct(FRHICommandListBase& CmdList, FRHICommandListDebugContext& DebugContext) = 0;
 };
 
@@ -401,7 +403,7 @@ private:
 };
 
 extern RHI_API FRHICommandListFenceAllocator GRHIFenceAllocator;
-
+// RHI命令列表基类.
 class RHI_API FRHICommandListBase : public FNoncopyable
 {
 public:
@@ -751,7 +753,7 @@ struct FRHICommand : public FRHICommandBase
 		FPlatformStackWalk::CaptureStackBackTrace(StackFrames, 16);
 	}
 #endif
-
+	// 执行命令后销毁.
 	void ExecuteAndDestruct(FRHICommandListBase& CmdList, FRHICommandListDebugContext& Context) override final
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL_STR(NameType::TStr(), RHICommandsChannel);
@@ -2255,7 +2257,7 @@ template<> void FRHICommandSetShaderTexture<FRHIComputeShader>::Execute(FRHIComm
 template<> void FRHICommandSetShaderResourceViewParameter<FRHIComputeShader>::Execute(FRHICommandListBase& CmdList);
 template<> void FRHICommandSetShaderSampler<FRHIComputeShader>::Execute(FRHICommandListBase& CmdList);
 
-
+// 计算命令队列
 class RHI_API FRHIComputeCommandList : public FRHICommandListBase
 {
 public:
@@ -2801,7 +2803,7 @@ public:
 	}
 #endif
 };
-
+// RHI命令队列.
 class RHI_API FRHICommandList : public FRHIComputeCommandList
 {
 public:
@@ -3077,12 +3079,18 @@ public:
 	FORCEINLINE_DEBUGGABLE void DrawPrimitive(uint32 BaseVertexIndex, uint32 NumPrimitives, uint32 NumInstances)
 	{
 		//check(IsOutsideRenderPass());
+		// 默认情况下Bypass为1, 进入此分支.
 		if (Bypass())
 		{
+			// 直接调用图形API的上下文的对应方法.
 			GetContext().RHIDrawPrimitive(BaseVertexIndex, NumPrimitives, NumInstances);
 			return;
 		}
+		// 分配单独的FRHICommandDrawPrimitive命令.
 		ALLOC_COMMAND(FRHICommandDrawPrimitive)(BaseVertexIndex, NumPrimitives, NumInstances);
+		
+		// 利用ALLOC_COMMAND分配的命令实例会进入FRHICommandListBase的命令链表，
+		// 但此时并未执行，而是等待其它合适的时机执行，例如在FRHICommandListImmediate::ImmediateFlush
 	}
 
 	FORCEINLINE_DEBUGGABLE void DrawIndexedPrimitive(FRHIIndexBuffer* IndexBuffer, int32 BaseVertexIndex, uint32 FirstInstance, uint32 NumVertices, uint32 StartIndex, uint32 NumPrimitives, uint32 NumInstances)
@@ -3810,7 +3818,7 @@ FTextureCubeRHIRef RHICreateTextureCubeArray(uint32 Size, uint32 ArraySize, uint
 
 extern RHI_API ERHIAccess RHIGetDefaultResourceState(ETextureCreateFlags InUsage, bool bInHasInitialData);
 extern RHI_API ERHIAccess RHIGetDefaultResourceState(EBufferUsageFlags InUsage, bool bInHasInitialData);
-
+// 立即模式的命令队列.
 class RHI_API FRHICommandListImmediate : public FRHICommandList
 {
 	template <typename LAMBDA>
@@ -4943,15 +4951,17 @@ public:
 		, bLatchedUseParallelAlgorithms(false)
 	{
 	}
+	// 静态接口, 获取立即命令列表.
 	static inline FRHICommandListImmediate& GetImmediateCommandList();
+	// 静态接口, 获取立即异步计算命令列表.
 	static inline FRHIAsyncComputeCommandListImmediate& GetImmediateAsyncComputeCommandList();
-
+	// 执行命令列表.
 	void ExecuteList(FRHICommandListBase& CmdList);
 	void ExecuteList(FRHICommandListImmediate& CmdList);
 	void LatchBypass();
-
+	// 等待RHI线程栅栏.
 	static void WaitOnRHIThreadFence(FGraphEventRef& Fence);
-
+	// 是否绕过命令生成模式, 如果是, 则直接调用目标平台的图形API.
 	FORCEINLINE_DEBUGGABLE bool Bypass()
 	{
 #if CAN_TOGGLE_COMMAND_LIST_BYPASS
@@ -4960,6 +4970,7 @@ public:
 		return !!DefaultBypass;
 #endif
 	}
+	// 是否使用并行算法.
 	FORCEINLINE_DEBUGGABLE bool UseParallelAlgorithms()
 	{
 #if CAN_TOGGLE_COMMAND_LIST_BYPASS
@@ -4969,21 +4980,27 @@ public:
 #endif
 	}
 	static void CheckNoOutstandingCmdLists();
+	// 检测RHI线程是否激活状态.
 	static bool IsRHIThreadActive();
+	// 检测RHI线程是否完全刷新了数据.
 	static bool IsRHIThreadCompletelyFlushed();
 
 private:
-
+	// 内部执行.
 	void ExecuteInner(FRHICommandListBase& CmdList);
 	friend class FExecuteRHIThreadTask;
+	// 内部执行, 真正执行转译.
 	static void ExecuteInner_DoExecute(FRHICommandListBase& CmdList);
 
 	bool bLatchedBypass;
 	bool bLatchedUseParallelAlgorithms;
 	friend class FRHICommandListBase;
+	// 同步变量.
 	FThreadSafeCounter UIDCounter;
 	FThreadSafeCounter OutstandingCmdListCount;
+	// 立即模式的命令队列.
 	FRHICommandListImmediate CommandListImmediate;
+	 // 立即模式的异步计算命令队列.
 	FRHIAsyncComputeCommandListImmediate AsyncComputeCmdListImmediate;
 };
 

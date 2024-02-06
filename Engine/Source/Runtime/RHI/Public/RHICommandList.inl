@@ -15,10 +15,12 @@ struct FRHICommandBase;
 
 FORCEINLINE_DEBUGGABLE void FRHICommandListBase::Flush()
 {
+	// 如果存在命令.
 	if (HasCommands())
 	{
 		check(!IsImmediate());
 		GRHICommandList.ExecuteList(*this);
+		// 用全局命令列表执行之. GRHICommandList的类型是FRHICommandListExecutor.
 	}
 }
 

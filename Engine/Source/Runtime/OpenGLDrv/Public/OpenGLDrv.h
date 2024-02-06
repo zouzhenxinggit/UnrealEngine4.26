@@ -1069,7 +1069,9 @@ private:
 	FSamplerStateRHIRef					PointSamplerState;
 
 	/** A list of all viewport RHIs that have been created. */
+	// 已创建的视口.
 	TArray<FOpenGLViewport*> Viewports;
+
 	TRefCountPtr<FOpenGLViewport>		DrawingViewport;
 	bool								bRevertToSharedContextAfterDrawingViewport;
 
@@ -1101,7 +1103,7 @@ private:
 
 	/** Cached mip-limits for textures when ARB_texture_view is unavailable */
 	TMap<GLuint, TPair<GLenum, GLenum>> TextureMipLimits;
-
+	// 底层平台相关的数据.
 	/** Underlying platform-specific data */
 	struct FPlatformOpenGLDevice* PlatformDevice;
 

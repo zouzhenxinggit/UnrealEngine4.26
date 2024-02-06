@@ -23,6 +23,7 @@ extern int32 GGlobalBufferNumFramesUnusedThresold;
 class RENDERCORE_API FRenderResource
 {
 public:
+	// 遍历所有资源, 执行回调接口.
 	template<typename FunctionType>
 	static void ForAllResources(const FunctionType& Function)
 	{

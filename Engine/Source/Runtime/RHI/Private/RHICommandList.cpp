@@ -312,7 +312,7 @@ void FRHICommandListExecutor::ExecuteInner_DoExecute(FRHICommandListBase& CmdLis
 	check(CmdList.Context || CmdList.ComputeContext);
 
 	FMemMark Mark(FMemStack::Get());
-
+	// 设置多GPU的Mask.
 #if WITH_MGPU
 	// Set the initial GPU mask on the contexts before executing any commands.
     // This avoids having to ensure that every command list has an initial
@@ -329,6 +329,7 @@ void FRHICommandListExecutor::ExecuteInner_DoExecute(FRHICommandListBase& CmdLis
 
 	FRHICommandListDebugContext DebugContext;
 	FRHICommandListIterator Iter(CmdList);
+	// 统计执行信息.
 #if STATS
 	bool bDoStats =  CVarRHICmdCollectRHIThreadStatsFromHighLevel.GetValueOnRenderThread() > 0 && FThreadStats::IsCollectingData() && (IsInRenderingThread() || IsInRHIThread());
 	if (bDoStats)
@@ -346,6 +347,7 @@ void FRHICommandListExecutor::ExecuteInner_DoExecute(FRHICommandListBase& CmdLis
 		}
 	}
 	else
+		// 统计指定事件.
 #elif ENABLE_STATNAMEDEVENTS
 	bool bDoStats = CVarRHICmdCollectRHIThreadStatsFromHighLevel.GetValueOnRenderThread() > 0 && GCycleStatsShouldEmitNamedEvents && (IsInRenderingThread() || IsInRHIThread());
 	if (bDoStats)
@@ -364,7 +366,9 @@ void FRHICommandListExecutor::ExecuteInner_DoExecute(FRHICommandListBase& CmdLis
 	}
 	else
 #endif
+		// 不调试或不统计信息的版本.
 	{
+		// 循环所有命令, 执行并销毁之.
 		while (Iter.HasCommandsLeft())
 		{
 			FRHICommandBase* Cmd = Iter.NextCommand();
@@ -373,6 +377,7 @@ void FRHICommandListExecutor::ExecuteInner_DoExecute(FRHICommandListBase& CmdLis
 			Cmd->ExecuteAndDestruct(CmdList, DebugContext);
 		}
 	}
+	// 充值命令列表.
 	CmdList.Reset();
 }
 
@@ -387,7 +392,7 @@ static FAutoConsoleTaskPriority CPrio_RHIThreadOnTaskThreads(
 
 static FCriticalSection GRHIThreadOnTasksCritical;
 
-
+// 执行RHI线程任务.
 class FExecuteRHIThreadTask
 {
 	FRHICommandListBase* RHICmdList;
@@ -403,7 +408,7 @@ public:
 	{
 		RETURN_QUICK_DECLARE_CYCLE_STAT(FExecuteRHIThreadTask, STATGROUP_TaskGraphTasks);
 	}
-
+	// 根据是否在专用的RHI线程而选择RHI或渲染线程.
 	ENamedThreads::Type GetDesiredThread()
 	{
 		check(IsRunningRHIInSeparateThread()); // this should never be used on a platform that doesn't support the RHI thread
@@ -418,10 +423,12 @@ public:
 		if (IsRunningRHIInTaskThread())
 		{
 PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			// 设置全局变量GRHIThreadId
 			GRHIThreadId = FPlatformTLS::GetCurrentThreadId();
 PRAGMA_ENABLE_DEPRECATION_WARNINGS
 		}
-		{
+		// 执行RHI命令队列.
+		{// 临界区, 保证线程访问安全.
 			FScopeLock Lock(&GRHIThreadOnTasksCritical);
 			GWorkingRHIThreadStartCycles = FPlatformTime::Cycles();
 
@@ -430,6 +437,7 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 			GWorkingRHIThreadTime += (FPlatformTime::Cycles() - GWorkingRHIThreadStartCycles); // this subtraction often wraps and the math stuff works
 		}
+		// 清空全局变量GRHIThreadId
 		if (IsRunningRHIInTaskThread())
 		{
 PRAGMA_DISABLE_DEPRECATION_WARNINGS
@@ -438,11 +446,11 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 		}
 	}
 };
-
+// 派发RHI线程任务.
 class FDispatchRHIThreadTask
 {
-	FRHICommandListBase* RHICmdList;
-	bool bRHIThread;
+	FRHICommandListBase* RHICmdList; // 待派发的命令列表.
+	bool bRHIThread;// 是否在RHI线程中派发.
 
 public:
 
@@ -456,7 +464,7 @@ public:
 	{
 		RETURN_QUICK_DECLARE_CYCLE_STAT(FDispatchRHIThreadTask, STATGROUP_TaskGraphTasks);
 	}
-
+	// 预期的线程由是否在RHI线程/是否在独立的RHI线程等变量决定.
 	ENamedThreads::Type GetDesiredThread()
 	{
 		// If we are using async dispatch, this task is somewhat redundant, but it does allow things to wait for dispatch without waiting for execution. 
@@ -469,13 +477,16 @@ public:
 
 	void DoTask(ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 	{
+		// 前序任务是RHIThreadTask.
 		check(bRHIThread || IsInRenderingThread());
 		FGraphEventArray Prereq;
 		if (RHIThreadTask.GetReference())
 		{
 			Prereq.Add(RHIThreadTask);
 		}
+		// 将当前任务放到PrevRHIThreadTask中.
 		PrevRHIThreadTask = RHIThreadTask;
+		// 创建FExecuteRHIThreadTask任务并赋值到RHIThreadTask.
 		RHIThreadTask = TGraphTask<FExecuteRHIThreadTask>::CreateTask(&Prereq, CurrentThread).ConstructAndDispatchWhenReady(RHICmdList);
 	}
 };
@@ -483,9 +494,11 @@ public:
 void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 {
 	check(CmdList.HasCommands()); 
-
+	// 是否在渲染线程中.
 	bool bIsInRenderingThread = IsInRenderingThread();
+	// 是否在游戏线程中.
 	bool bIsInGameThread = IsInGameThread();
+	// 开启了专用的RHI线程.
 	if (IsRunningRHIInSeparateThread())
 	{
 		bool bAsyncSubmit = false;
@@ -496,8 +509,10 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 			{
 				QUICK_SCOPE_CYCLE_COUNTER(STAT_FRHICommandListExecutor_ExecuteInner_DoTasksBeforeDispatch);
 				// move anything down the pipe that needs to go
+				// 把所有需要传递的东西都处理掉.
 				FTaskGraphInterface::Get().ProcessThreadUntilIdle(RenderThread_Local);
 			}
+			// 检测子命令列表任务是否完成.
 			bAsyncSubmit = CVarRHICmdAsyncRHIThreadDispatch.GetValueOnRenderThread() > 0;
 			if (RenderThreadSublistDispatchTask.GetReference() && RenderThreadSublistDispatchTask->IsComplete())
 			{
@@ -506,6 +521,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 				bRenderThreadSublistDispatchTaskClearedOnGT = bIsInGameThread;
 #endif
 				RenderThreadSublistDispatchTask = nullptr;
+				// 检测RHI线程任务是否完成.
 				if (bAsyncSubmit && RHIThreadTask.GetReference() && RHIThreadTask->IsComplete())
 			{
 				RHIThreadTask = nullptr;
@@ -521,6 +537,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 		}
 		if (CVarRHICmdUseThread.GetValueOnRenderThread() > 0 && bIsInRenderingThread && !bIsInGameThread)
 		{
+			// 交换前序和RT线程任务的列表.
 			FRHICommandList* SwapCmdList;
 			FGraphEventArray Prereq;
 			Exchange(Prereq, CmdList.RTTasks); 
@@ -541,8 +558,9 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 				CmdList.Data.bInsideRenderPass = SwapCmdList->Data.bInsideRenderPass;
 				CmdList.Data.bInsideComputePass = SwapCmdList->Data.bInsideComputePass;
 			}
+			// 提交任务.
 			QUICK_SCOPE_CYCLE_COUNTER(STAT_FRHICommandListExecutor_SubmitTasks);
-
+			// 创建FDispatchRHIThreadTask, 并将AllOutstandingTasks和RenderThreadSublistDispatchTask作为它的前序任务.
 			//if we use a FDispatchRHIThreadTask, we must have it pass an event along to the FExecuteRHIThreadTask it will spawn so that fences can know which event to wait on for execution completion
 			//before the dispatch completes.
 			//if we use a FExecuteRHIThreadTask directly we pass the same event just to keep things consistent.
@@ -559,6 +577,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 #endif
 				RenderThreadSublistDispatchTask = TGraphTask<FDispatchRHIThreadTask>::CreateTask(&Prereq, ENamedThreads::GetRenderThread()).ConstructAndDispatchWhenReady(SwapCmdList, bAsyncSubmit);
 			}
+			// 创建FExecuteRHIThreadTask, 并将RHIThreadTask作为它的前序任务.
 			else
 			{
 				check(!RenderThreadSublistDispatchTask.GetReference()); // if we are doing submits, there better not be any of these in flight since then the RHIThreadTask would get out of order.
@@ -571,11 +590,13 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 			}
 			if (CVarRHICmdForceRHIFlush.GetValueOnRenderThread() > 0 )
 			{
+				// 检测渲染线程是否死锁.
 				if (FTaskGraphInterface::Get().IsThreadProcessingTasks(RenderThread_Local))
 				{
 					// this is a deadlock. RT tasks must be done by now or they won't be done. We could add a third queue...
 					UE_LOG(LogRHI, Fatal, TEXT("Deadlock in FRHICommandListExecutor::ExecuteInner 2."));
 				}
+				// 检测RenderThreadSublistDispatchTask是否完成.
 				if (RenderThreadSublistDispatchTask.GetReference())
 				{
 					FTaskGraphInterface::Get().WaitUntilTaskCompletes(RenderThreadSublistDispatchTask, RenderThread_Local);
@@ -585,6 +606,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 #endif
 					RenderThreadSublistDispatchTask = nullptr;
 				}
+				// 等待RHIThreadTask完成.
 				while (RHIThreadTask.GetReference())
 				{
 					FTaskGraphInterface::Get().WaitUntilTaskCompletes(RHIThreadTask, RenderThread_Local);
@@ -597,6 +619,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 			}
 			return;
 		}
+		// 执行RTTasks/RenderThreadSublistDispatchTask/RHIThreadTask等任务.
 		if (bIsInRenderingThread)
 		{
 			if (CmdList.RTTasks.Num())
@@ -640,6 +663,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 			}
 		}
 	}
+	// 非RHI专用线程.
 	else
 	{
 		if (bIsInRenderingThread && CmdList.RTTasks.Num())
@@ -654,7 +678,7 @@ void FRHICommandListExecutor::ExecuteInner(FRHICommandListBase& CmdList)
 			CmdList.RTTasks.Reset();
 		}
 	}
-
+	// 内部执行命令.
 	ExecuteInner_DoExecute(CmdList);
 }
 
@@ -670,6 +694,7 @@ void FRHICommandListExecutor::ExecuteList(FRHICommandListBase& CmdList)
 
 	check(&CmdList != &GetImmediateCommandList() && (GRHISupportsParallelRHIExecute || IsInRenderingOrRHIThread()));
 
+	// 执行命令队列转换之前先刷新已有的命令.
 	if (IsInRenderingThread() && !GetImmediateCommandList().IsExecuting()) // don't flush if this is a recursive call and we are already executing the immediate command list
 	{
 		GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
@@ -679,7 +704,8 @@ void FRHICommandListExecutor::ExecuteList(FRHICommandListBase& CmdList)
 	INC_DWORD_STAT_BY(STAT_NonImmedCmdListCount, CmdList.NumCommands);
 
 	SCOPE_CYCLE_COUNTER(STAT_NonImmedCmdListExecuteTime);
-	ExecuteInner(CmdList);
+	// 内部执行.
+	ExecuteInner(CmdList); 
 }
 
 void FRHICommandListExecutor::ExecuteList(FRHICommandListImmediate& CmdList)
@@ -920,6 +946,7 @@ FRHICommandListBase::FRHICommandListBase(FRHIGPUMask InGPUMask)
 
 FRHICommandListBase::~FRHICommandListBase()
 {
+	// 刷新命令列表.
 	Flush();
 	GRHICommandList.OutstandingCmdListCount.Decrement();
 }
@@ -973,9 +1000,13 @@ FAutoConsoleTaskPriority CPrio_FParallelTranslateCommandListPrepass(
 
 class FParallelTranslateCommandList
 {
+	// 待转译的命令列表.
 	FRHICommandListBase** RHICmdLists;
+	// 需转译的命令列表数量.
 	int32 NumCommandLists;
+	// 上下文容器.
 	IRHICommandContextContainer* ContextContainer;
+	// 是否提前深度pass.
 	bool bIsPrepass;
 public:
 
@@ -987,7 +1018,7 @@ public:
 	{
 		check(RHICmdLists && ContextContainer && NumCommandLists);
 	}
-
+	// 预期的线程, 根据是否Prepass而定.
 	static FORCEINLINE TStatId GetStatId()
 	{
 		RETURN_QUICK_DECLARE_CYCLE_STAT(FParallelTranslateCommandList, STATGROUP_TaskGraphTasks);
@@ -995,11 +1026,12 @@ public:
 
 	ENamedThreads::Type GetDesiredThread()
 	{
+		// 如果是prepass，使用普通优先级的线程但高任务优先级，其它pass则使用普通优先级的线程和普通的任务优先级。
 		return bIsPrepass ? CPrio_FParallelTranslateCommandListPrepass.Get() : CPrio_FParallelTranslateCommandList.Get();
 	}
 
 	static ESubsequentsMode::Type GetSubsequentsMode() { return ESubsequentsMode::TrackSubsequents; }
-
+	// 执行任务.
 	void DoTask(ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ParallelChainTranslate);
@@ -1010,9 +1042,12 @@ public:
 		check(Context);
 		for (int32 Index = 0; Index < NumCommandLists; Index++)
 		{
+			// 设置子命令队列的上下文.
 			RHICmdLists[Index]->SetContext(Context);
+			// 删除子命令队列. 
 			delete RHICmdLists[Index];
 		}
+		// 清理上下文.
 		ContextContainer->FinishContext();
 	}
 };
@@ -1115,16 +1150,23 @@ FRHICOMMAND_MACRO(FRHICommandWaitForAndSubmitSubList)
 DECLARE_CYCLE_STAT(TEXT("Parallel Setup Translate"), STAT_ParallelSetupTranslate, STATGROUP_RHICMDLIST);
 
 FAutoConsoleTaskPriority CPrio_FParallelTranslateSetupCommandList(
+    // 控制台名称.
 	TEXT("TaskGraph.TaskPriorities.ParallelTranslateSetupCommandList"),
+	// 描述.
 	TEXT("Task and thread priority for FParallelTranslateSetupCommandList."),
+	// 如果有高优先级的线程, 使用之.
 	ENamedThreads::HighThreadPriority, // if we have high priority task threads, then use them...
+	// 使用高任务优先级.
 	ENamedThreads::HighTaskPriority, // .. at high task priority
+	// 如果没有高优先级的线程, 则使用普遍优先级的线程, 但使用高任务优先级代替之.
 	ENamedThreads::HighTaskPriority // if we don't have hi pri threads, then use normal priority threads at high task priority instead
 	);
 
 class FParallelTranslateSetupCommandList
 {
+	// 用于提交子命令列表的父命令列表.
 	FRHICommandList* RHICmdList;
+	// 待提交的子命令队列列表.
 	FRHICommandListBase** RHICmdLists;
 	int32 NumCommandLists;
 	bool bIsPrepass;
@@ -1139,10 +1181,11 @@ public:
 		, bIsPrepass(bInIsPrepass)
 	{
 		check(RHICmdList && RHICmdLists && NumCommandLists);
+		// 单个子命令队列的最小尺寸.
 		MinSize = CVarRHICmdMinCmdlistSizeForParallelTranslate.GetValueOnRenderThread() * 1024;
 		MinCount = CVarRHICmdMinCmdlistForParallelTranslate.GetValueOnRenderThread();
 	}
-
+	// 预期的线程.
 	static FORCEINLINE TStatId GetStatId()
 	{
 		RETURN_QUICK_DECLARE_CYCLE_STAT(FParallelTranslateSetupCommandList, STATGROUP_TaskGraphTasks);
@@ -1150,11 +1193,12 @@ public:
 
 	static FORCEINLINE ENamedThreads::Type GetDesiredThread()
 	{
+		// 注意FParallelTranslateSetupCommandList的预期线程由CPrio_FParallelTranslateSetupCommandList决定
 		return CPrio_FParallelTranslateSetupCommandList.Get();
 	}
 
 	static FORCEINLINE ESubsequentsMode::Type GetSubsequentsMode() { return ESubsequentsMode::TrackSubsequents; }
-
+	// 执行设置任务.
 	void DoTask(ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ParallelSetupTranslate);
@@ -1169,6 +1213,7 @@ public:
 		int32 EffectiveThreads = 0;
 		int32 Start = 0;
 		// this is pretty silly but we need to know the number of jobs in advance, so we run the merge logic twice
+		// 合并绘制指令, 计算所需的线程数量.
 		while (Start < NumCommandLists)
 		{
 			int32 Last = Start;
@@ -1183,13 +1228,14 @@ public:
 			Start = Last + 1;
 			EffectiveThreads++;
 		} 
-
+		// 如果需要的线程数量太少, 则串行提交子命令队列.
 		if (EffectiveThreads < MinCount)
 		{
 			FGraphEventRef Nothing;
 			for (int32 Index = 0; Index < NumCommandLists; Index++)
 			{
 				FRHICommandListBase* CmdList = RHICmdLists[Index];
+				// 使用了ALLOC_COMMAND_CL分配子命令队列提交接口.
 				ALLOC_COMMAND_CL(*RHICmdList, FRHICommandWaitForAndSubmitSubList)(Nothing, CmdList);
 
 #if WITH_MGPU
@@ -1199,11 +1245,11 @@ public:
 #endif
 			}
 		}
-		else
+		else // 并行提交.
 		{
 			Start = 0;
 			int32 ThreadIndex = 0;
-
+			// 合并数量太少的命令队列.
 			while (Start < NumCommandLists)
 			{
 				int32 Last = Start;
@@ -1215,12 +1261,14 @@ public:
 					DrawCnt += Sizes[Last];
 				}
 				check(Last >= Start);
-
+				// 获取ContextContainer
 				IRHICommandContextContainer* ContextContainer =  RHIGetCommandContextContainer(ThreadIndex, EffectiveThreads, RHICmdList->GetGPUMask());
 				check(ContextContainer);
-
+				// 创建并行转译任务FParallelTranslateCommandList.
 				FGraphEventRef TranslateCompletionEvent = TGraphTask<FParallelTranslateCommandList>::CreateTask(nullptr, ENamedThreads::GetRenderThread()).ConstructAndDispatchWhenReady(&RHICmdLists[Start], 1 + Last - Start, ContextContainer, bIsPrepass);
+				// 此任务结束前须确保转译任务完成.
 				MyCompletionGraphEvent->DontCompleteUntil(TranslateCompletionEvent);
+				// 调用RHICmdList的FRHICommandWaitForAndSubmitSubListParallel等待子命令列表的并行提交
 				ALLOC_COMMAND_CL(*RHICmdList, FRHICommandWaitForAndSubmitSubListParallel)(TranslateCompletionEvent, ContextContainer, EffectiveThreads, ThreadIndex++);
 				Start = Last + 1;
 			}
@@ -1237,9 +1285,10 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 	if (IsRunningRHIInSeparateThread())
 	{
 		// Execute everything that is queued up on the immediate command list before submitting sublists built in parallel.
+		// 在提交并行构建的子列表之前，立即执行命令列表上排队的所有命令.
 		FRHICommandListImmediate& ImmediateCommandList = FRHICommandListExecutor::GetImmediateCommandList();
 		ImmediateCommandList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread); // we should start on the stuff before this async list
-
+		// 清空栅栏.
 		// as good a place as any to clear this
 		if (RHIThreadBufferLockFence.GetReference() && RHIThreadBufferLockFence->IsComplete())
 		{
@@ -1248,19 +1297,22 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 	}
 #if !UE_BUILD_SHIPPING
 	// do a flush before hand so we can tell if it was this parallel set that broke something, or what came before.
+	// 处理前先刷新命令，这样就能知道这个平行集打碎了什么东西，或是之前有什么东西.
 	if (CVarRHICmdFlushOnQueueParallelSubmit.GetValueOnRenderThread())
 	{
 		CSV_SCOPED_TIMING_STAT(RHITFlushes, QueueParallelAsyncCommandListSubmit);
 		FRHICommandListExecutor::GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::FlushRHIThread);
 	}
 #endif
-
+	// 确保开启了RHI线程.
 	if (Num && IsRunningRHIInSeparateThread())
 	{
 		static const auto ICVarRHICmdBalanceParallelLists = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.RHICmdBalanceParallelLists"));
-
+		// r.RHICmdBalanceParallelLists==0 且 GRHISupportsParallelRHIExecute==true 且 使用延迟上下文.
+		// 不平衡命令队列提交模式.
 		if (ICVarRHICmdBalanceParallelLists->GetValueOnRenderThread() == 0 && CVarRHICmdBalanceTranslatesAfterTasks.GetValueOnRenderThread() > 0 && GRHISupportsParallelRHIExecute && CVarRHICmdUseDeferredContexts.GetValueOnAnyThread() > 0)
 		{
+			// 处理前序任务.
 			FGraphEventArray Prereq;
 			FRHICommandListBase** RHICmdLists = (FRHICommandListBase**)Alloc(sizeof(FRHICommandListBase*) * Num, alignof(FRHICommandListBase*));
 			for (int32 Index = 0; Index < Num; Index++)
@@ -1274,20 +1326,28 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 					WaitOutstandingTasks.Add(AnyThreadCompletionEvent);
 				}
 			}
+			// 确保在开始任何并行转译之前，所有旧的缓冲区锁都已完成.
 			// this is used to ensure that any old buffer locks are completed before we start any parallel translates
 			if (RHIThreadBufferLockFence.GetReference())
 			{
 				Prereq.Add(RHIThreadBufferLockFence);
 			}
+			// 新建FRHICommandList.
 			FRHICommandList* CmdList = new FRHICommandList(GetGPUMask());
+			// 拷贝渲染线程上下文.
 			CmdList->CopyRenderThreadContexts(*this);
+			// 创建设置转译任务(FParallelTranslateSetupCommandList).
 			FGraphEventRef TranslateSetupCompletionEvent = TGraphTask<FParallelTranslateSetupCommandList>::CreateTask(&Prereq, ENamedThreads::GetRenderThread()).ConstructAndDispatchWhenReady(CmdList, &RHICmdLists[0], Num, bIsPrepass);
+			// 入队命令队列提交.
 			QueueCommandListSubmit(CmdList);
+			// 添加设置转译事件到列表.
 			AllOutstandingTasks.Add(TranslateSetupCompletionEvent);
+			// 避免在异步命令列表之后的东西被绑定到它.
 			if (IsRunningRHIInSeparateThread())
 			{
 				FRHICommandListExecutor::GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::DispatchToRHIThread); // we don't want stuff after the async cmd list to be bundled with it
 			}
+			// 刷新命令到RHI线程.
 #if !UE_BUILD_SHIPPING
 			if (CVarRHICmdFlushOnQueueParallelSubmit.GetValueOnRenderThread())
 			{
@@ -1297,6 +1357,7 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 #endif
 			return;
 		}
+		// 平衡命令队列提交模式.
 		IRHICommandContextContainer* ContextContainer = nullptr;
 		bool bMerge = !!CVarRHICmdMergeSmallDeferredContexts.GetValueOnRenderThread();
 		int32 EffectiveThreads = 0;
@@ -1305,6 +1366,7 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 		if (GRHISupportsParallelRHIExecute && CVarRHICmdUseDeferredContexts.GetValueOnAnyThread() > 0)
 		{
 			// this is pretty silly but we need to know the number of jobs in advance, so we run the merge logic twice
+			// 由于需要提前知道作业的数量，因此运行了两次合并逻辑.(可改进)
 			while (Start < Num)
 			{
 				int32 Last = Start;
@@ -1328,6 +1390,7 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 		}
 		if (ContextContainer)
 		{
+			// 又一次合并操作.
 			while (Start < Num)
 			{
 				int32 Last = Start;
@@ -1420,7 +1483,7 @@ void FRHICommandListBase::QueueParallelAsyncCommandListSubmit(FGraphEventRef* An
 void FRHICommandListBase::QueueAsyncCommandListSubmit(FGraphEventRef& AnyThreadCompletionEvent, class FRHICommandList* CmdList)
 {
 	check(IsInRenderingThread() && IsImmediate());
-
+	// ALLOC_COMMAND分配的命令实例会进入FRHICommandListBase的命令链表
 	if (IsRunningRHIInSeparateThread())
 	{
 		FRHICommandListExecutor::GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::DispatchToRHIThread); // we should start on the stuff before this async list
@@ -1433,6 +1496,7 @@ void FRHICommandListBase::QueueAsyncCommandListSubmit(FGraphEventRef& AnyThreadC
 		}
 		WaitOutstandingTasks.Add(AnyThreadCompletionEvent);
 	}
+	// ALLOC_COMMAND分配的命令实例会进入FRHICommandListBase的命令链表
 	ALLOC_COMMAND(FRHICommandWaitForAndSubmitSubList)(AnyThreadCompletionEvent, CmdList);
 	if (IsRunningRHIInSeparateThread())
 	{
@@ -1678,6 +1742,8 @@ void FRHICommandList::EndFrame()
 
 DECLARE_CYCLE_STAT(TEXT("Explicit wait for tasks"), STAT_ExplicitWait, STATGROUP_RHICMDLIST);
 DECLARE_CYCLE_STAT(TEXT("Prewait dispatch"), STAT_PrewaitDispatch, STATGROUP_RHICMDLIST);
+
+// 等待任务完成.
 void FRHICommandListBase::WaitForTasks(bool bKnownToBeComplete)
 {
 	check(IsImmediate() && IsInRenderingThread());
@@ -1732,6 +1798,7 @@ FScopedCommandListWaitForTasks::~FScopedCommandListWaitForTasks()
 }
 
 DECLARE_CYCLE_STAT(TEXT("Explicit wait for dispatch"), STAT_ExplicitWaitDispatch, STATGROUP_RHICMDLIST);
+// 等待渲染线程派发完成.
 void FRHICommandListBase::WaitForDispatch()
 {
 	check(IsImmediate() && IsInRenderingThread());
@@ -1864,7 +1931,7 @@ void FRHICommandListImmediate::UnStallRHIThread()
 	GRHIThreadOnTasksCritical.Unlock();
 	FPlatformAtomics::InterlockedDecrement(&StallCount);
 }
-
+// 等待RHI线程任务完成.
 void FRHICommandListBase::WaitForRHIThreadTasks()
 {
 	check(IsImmediate() && IsInRenderingThread());

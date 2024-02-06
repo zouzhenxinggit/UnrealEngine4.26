@@ -290,6 +290,7 @@ bool FDeferredShadingSceneRenderer::RenderPrePassViewParallel(const FViewInfo& V
 	check(ParentCmdList.IsOutsideRenderPass());
 
 	{
+		// 构造FPrePassParallelCommandListSet实例.
 		FPrePassParallelCommandListSet ParallelCommandListSet(ParentCmdList, *this, View,
 			CVarRHICmdFlushRenderThreadTasksPrePass.GetValueOnRenderThread() == 0 && CVarRHICmdFlushRenderThreadTasks.GetValueOnRenderThread() == 0);
 
@@ -418,7 +419,7 @@ bool FDeferredShadingSceneRenderer::PreRenderPrePass(FRHICommandListImmediate& R
 
 	// RenderPrePassHMD clears the depth buffer. If this changes we must change RenderPrePass to maintain the correct behavior!
 	bool bDepthWasCleared = RenderPrePassHMD(RHICmdList);
-
+	// 场景RT快照.
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
 
 	// Both compute approaches run earlier, so skip clearing stencil here, just load existing.

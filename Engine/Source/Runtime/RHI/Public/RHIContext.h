@@ -94,6 +94,7 @@ private:
 };
 
 /** Context that is capable of doing Compute work.  Can be async or compute on the gfx pipe. */
+// 能够执行计算工作的上下文。可以在gfx管道上执行异步或计算
 class IRHIComputeContext
 {
 public:
@@ -710,6 +711,7 @@ FORCEINLINE FBoundShaderStateRHIRef RHICreateBoundShaderState(
 class IRHICommandContextPSOFallback : public IRHICommandContext
 {
 public:
+	// 设置渲染状态.
 	/**
 	* Set bound shader state. This will set the vertex decl/shader, and pixel shader
 	* @param BoundShaderState - state resource
@@ -728,6 +730,7 @@ public:
 	* This will set most relevant pipeline state. Legacy APIs are expected to set corresponding disjoint state as well.
 	* @param GraphicsShaderState - the graphics pipeline state
 	*/
+	// 管线状态.
 	virtual void RHISetGraphicsPipelineState(FRHIGraphicsPipelineState* GraphicsState, bool bApplyAdditionalState) override
 	{
 		FRHIGraphicsPipelineStateFallBack* FallbackGraphicsState = static_cast<FRHIGraphicsPipelineStateFallBack*>(GraphicsState);

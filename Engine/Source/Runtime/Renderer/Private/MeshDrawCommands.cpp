@@ -1277,6 +1277,7 @@ void FParallelMeshDrawCommandPass::DispatchDraw(FParallelCommandListSet* Paralle
 
 			if (TaskEventRef.IsValid())
 			{
+				// 增加派发前序任务.
 				RHICommandList.AddDispatchPrerequisite(TaskEventRef);
 			}
 
@@ -1314,8 +1315,9 @@ void FParallelMeshDrawCommandPass::DispatchDraw(FParallelCommandListSet* Paralle
 
 		// Distribute work evenly to the available task graph workers based on NumEstimatedDraws.
 		// Every task will then adjust it's working range based on FVisibleMeshDrawCommandProcessTask results.
+		// 基于NumEstimatedDraws将工作平均分配给可用的task graph工作线程.  
+		// 每个任务将根据FVisibleMeshDrawCommandProcessTask结果调整它的工作范围.
 
-		// 构造与工作线程数量相同的并行绘制任务数
 		const int32 NumThreads = FMath::Min<int32>(FTaskGraphInterface::Get().GetNumWorkerThreads(), ParallelCommandListSet->Width);
 		const int32 NumTasks = FMath::Min<int32>(NumThreads, FMath::DivideAndRoundUp(MaxNumDraws, ParallelCommandListSet->MinDrawsPerCommandList));
 		const int32 NumDrawsPerTask = FMath::DivideAndRoundUp(MaxNumDraws, NumTasks);
@@ -1326,15 +1328,18 @@ void FParallelMeshDrawCommandPass::DispatchDraw(FParallelCommandListSet* Paralle
 			const int32 NumDraws = FMath::Min(NumDrawsPerTask, MaxNumDraws - StartIndex);
 			checkSlow(NumDraws > 0);
 
+			// 建立NumTasks个FRHICommandList, 添加到ParallelCommandListSet.
+			// NewParallelCommandList新建一个并行的命令队列
 			FRHICommandList* CmdList = ParallelCommandListSet->NewParallelCommandList();
 			// 构造FDrawVisibleMeshCommandsAnyThreadTask实例并加入TaskGraph中，其中TaskContext.MeshDrawCommands就是上一节阐述过的由FMeshPassProcessor生成的。
 			FGraphEventRef AnyThreadCompletionEvent = TGraphTask<FDrawVisibleMeshCommandsAnyThreadTask>::CreateTask(&Prereqs, RenderThread)
 				.ConstructAndDispatchWhenReady(*CmdList, TaskContext.MeshDrawCommands, TaskContext.MinimalPipelineStatePassSet, PrimitiveIdsBuffer, BasePrimitiveIdsOffset, TaskContext.bDynamicInstancing, TaskContext.InstanceFactor, TaskIndex, NumTasks);
 			// 将事件加入ParallelCommandListSet，以便追踪深度Pass的并行绘制是否完成。
+			// 添加命令/事件等数据到ParallelCommandListSet.
 			ParallelCommandListSet->AddParallelCommandList(CmdList, AnyThreadCompletionEvent, NumDraws);
 		}
 	}
-	else
+	else // 非并行模式
 	{
 		QUICK_SCOPE_CYCLE_COUNTER(STAT_MeshPassDrawImmediate);
 

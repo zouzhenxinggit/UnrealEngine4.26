@@ -653,6 +653,7 @@ void FParallelCommandListSet::Dispatch(bool bHighPriority)
 	if (bSpewBalance)
 	{
 		// finish them all
+		// 等待之前的任务完成.
 		for (auto& Event : Events)
 		{
 			FTaskGraphInterface::Get().WaitUntilTaskCompletes(Event, RenderThread_Local);
@@ -665,6 +666,7 @@ void FParallelCommandListSet::Dispatch(bool bHighPriority)
 			Index++;
 		}
 	}
+	// 是否并行转译.
 	bool bActuallyDoParallelTranslate = GRHISupportsParallelRHIExecute && CommandLists.Num() >= CVarRHICmdMinCmdlistForParallelSubmit.GetValueOnRenderThread();
 	if (bActuallyDoParallelTranslate)
 	{
@@ -672,6 +674,7 @@ void FParallelCommandListSet::Dispatch(bool bHighPriority)
 		bool bIndeterminate = false;
 		for (int32 Count : NumDrawsIfKnown)
 		{
+			// 不能确定这里面有多少, 假设应该进行平行转译.
 			if (Count < 0)
 			{
 				bIndeterminate = true;
@@ -679,6 +682,7 @@ void FParallelCommandListSet::Dispatch(bool bHighPriority)
 			}
 			Total += Count;
 		}
+		// 命令队列数量太少, 不并行转译.
 		if (!bIndeterminate && Total < MinDrawsPerCommandList)
 		{
 			UE_CLOG(bSpewBalance, LogTemp, Display, TEXT("Disabling parallel translate because the number of draws is known to be small."));
@@ -689,14 +693,18 @@ void FParallelCommandListSet::Dispatch(bool bHighPriority)
 	if (bActuallyDoParallelTranslate)
 	{
 		UE_CLOG(bSpewBalance, LogTemp, Display, TEXT("%d cmdlists for parallel translate"), CommandLists.Num());
+		// 确保支持并行的RHI执行.
 		check(GRHISupportsParallelRHIExecute);
 		NumAlloc -= CommandLists.Num();
+		// 用父命令队列入队并行异步命令队列提交.
 		ParentCmdList.QueueParallelAsyncCommandListSubmit(&Events[0], bHighPriority, &CommandLists[0], &NumDrawsIfKnown[0], CommandLists.Num(), (MinDrawsPerCommandList * 4) / 3, bSpewBalance);
 		// #todo-renderpasses PS4 breaks if this isn't here. Why?
+		// 在命令列表上设置状态.
 		SetStateOnCommandList(ParentCmdList);
+		// 结束Pass渲染.
 		ParentCmdList.EndRenderPass();
 	}
-	else
+	else // 非并行模式.
 	{
 		UE_CLOG(bSpewBalance, LogTemp, Display, TEXT("%d cmdlists (no parallel translate desired)"), CommandLists.Num());
 		for (int32 Index = 0; Index < CommandLists.Num(); Index++)
@@ -705,10 +713,12 @@ void FParallelCommandListSet::Dispatch(bool bHighPriority)
 			NumAlloc--;
 		}
 	}
+	// 重置数据.
 	CommandLists.Reset();
 	Snapshot = nullptr;
 	Events.Reset();
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FParallelCommandListSet_Dispatch_ServiceLocalQueue);
+	// 等待渲染线程处理完成.
 	FTaskGraphInterface::Get().ProcessThreadUntilIdle(RenderThread_Local);
 }
 
@@ -731,10 +741,12 @@ FRHICommandList* FParallelCommandListSet::NewParallelCommandList()
 	{
 		FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(ParentCmdList);
 		check(&SceneContext == &FSceneRenderTargets::Get_FrameConstantsOnly()); // the immediate should not have an overridden context
+		// 创建场景RT快照.
 		if (!Snapshot)
 		{
 			Snapshot = SceneContext.CreateSnapshot(View);
 		}
+		// 将RT快照设置到命令队列上.
 		Snapshot->SetSnapshotOnCmdList(*Result);
 		check(&SceneContext != &FSceneRenderTargets::Get(*Result)); // the new commandlist should have a snapshot
 	}

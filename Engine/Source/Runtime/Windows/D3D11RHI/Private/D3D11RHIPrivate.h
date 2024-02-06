@@ -776,11 +776,12 @@ public:
 
 protected:
 	/** The global D3D interface. */
+	// D3D工厂(接口).
 	TRefCountPtr<IDXGIFactory1> DXGIFactory1;
 
 	// Whether HDR is available from the particular DXGI factories available
 	bool bDXGISupportsHDR;
-
+	// D3D设备的立即上下文.
 	/** The global D3D device's immediate context */
 	TRefCountPtr<FD3D11DeviceContext> Direct3DDeviceIMContext;
 
@@ -791,7 +792,7 @@ protected:
 #if INTEL_METRICSDISCOVERY
 	TUniquePtr<Intel_MetricsDiscovery_ContextData> IntelMetricsDiscoveryHandle;
 #endif
-
+	// D3D设备.
 	/** The global D3D device's immediate context */
 	TRefCountPtr<FD3D11Device> Direct3DDevice;
 
@@ -800,7 +801,7 @@ protected:
 	/** Tracks outstanding locks on each thread */
 	FD3D11LockTracker LockTracker;
 	FCriticalSection LockTrackerCS;
-
+	// 视口.
 	/** A list of all viewport RHIs that have been created. */
 	TArray<FD3D11Viewport*> Viewports;
 
@@ -815,6 +816,7 @@ protected:
 	 * AGSContext does not implement AddRef/Release.
 	 * Just use a bare pointer.
 	 */
+	// AMD AGS工具库上下文.
 	AGSContext* AmdAgsContext;
 
 #if INTEL_EXTENSIONS

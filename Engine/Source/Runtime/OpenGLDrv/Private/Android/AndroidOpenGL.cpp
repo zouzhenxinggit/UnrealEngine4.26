@@ -52,7 +52,7 @@ static TAutoConsoleVariable<int32> CVarDisableFBFNonCoherent(
 	0,
 	TEXT("Whether to disable usage of QCOM_shader_framebuffer_fetch_noncoherent extension\n"),
 	ECVF_ReadOnly);
-
+// 安卓系统的OpenGL设备.
 struct FPlatformOpenGLDevice
 {
 	bool TargetDirty;

@@ -89,6 +89,7 @@ public:
 	/** Presents the swap chain. 
 	 * Returns true if Present was done by Engine.
 	 */
+	// 呈现交换链.
 	bool Present(bool bLockToVsync);
 
 	// Accessors.
@@ -141,7 +142,7 @@ protected:
 	 * Returns true if Present was done by Engine.
 	 */
 	bool PresentChecked(int32 SyncInterval);
-
+	// 动态RHI.
 	FD3D11DynamicRHI* D3DRHI;
 	uint64 LastFlipTime;
 	uint64 LastFrameComplete;
@@ -165,8 +166,10 @@ protected:
 #if PLATFORM_HOLOLENS
 	TRefCountPtr<IDXGISwapChain1> SwapChain;
 #else
+	// 交换链.
 	TRefCountPtr<IDXGISwapChain> SwapChain;
 #endif
+	// 后渲染缓冲.
 	TRefCountPtr<FD3D11Texture2D> BackBuffer;
 
 	// Support for selecting non-default output for display in fullscreen exclusive
